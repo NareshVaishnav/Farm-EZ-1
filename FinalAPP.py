@@ -1,13 +1,24 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for
 from geopy.geocoders import Nominatim
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import folium
-
+from flask_cors import CORS
+from flask_pymongo import PyMongo
 sns.set()
 
 app = Flask(__name__)
+
+
+CORS(app)
+
+app.config['MONGO_DBNAME'] = 'FarmEz'
+app.config['MONGO_URI'] = 'mongodb+srv://nareshvaishnavrko11:nareshrko11@cluster0.hudqzdr.mongodb.net/FarmEz'
+
+mongo = PyMongo(app)
+
 
 raw_data = pd.read_csv('FinalDataset2.csv')
 raw_data = raw_data.drop(['Latitude', 'Longitude'], axis=1)
@@ -119,74 +130,65 @@ def farmindex():
     return render_template('findex.html')
 
 @app.route('/submit', methods=['POST'])
-def submit():
-    name = request.form['name']
-    age = request.form['age']
-    email = request.form['email']
-    district = request.form['district']
-    taluka = request.form['taluka']
-    address = request.form['address']
-    landsize = request.form['landsize']
-    phone_no= request.form['phone_no']
-    other_info = request.form['other_info']
-    # Create a new DataFrame
-    data = {'Name': [name],'Phone_no': [phone_no],'Land_size': [landsize],
-            'Address': [address],'District': [district],'Taluka': [taluka],'Age':[age],'Email':[email],'Other_info':[other_info]}
-   
-    df = pd.DataFrame(data)
-    
-    # Get latitude and longitude from address using Geopy
-    geolocator = Nominatim(user_agent="my_app")
-    location = geolocator.geocode(address)
-    latitude = location.latitude
-    longitude = location.longitude
-    
-    # Add latitude and longitude to DataFrame
-    df['Latitude'] = latitude
-    df['Longitude'] = longitude
-    
-    # Save the DataFrame to F_dataset.csv without appending age and email columns
-    existing_df = pd.read_csv('F_Dataset.csv')
-    # existing_df = existing_df.drop(['Age', 'Email'], axis=1)
-    updated_df = pd.concat([existing_df, df], ignore_index=True)
-    updated_df.to_csv('F_Dataset.csv', index=False)
-    
-    return render_template('popup.html')
+def register():
+    if request.method == 'POST':
+        fullName = request.form['full-name']
+        Age = request.form['Age']
+        email = request.form['email']
+        phone = request.form['phone']
+        district = request.form['district']
+        taluka = request.form['taluka']
+        landsize = request.form['landsize']
+        address = request.form['address']
+        latitude = request.form['latitude']
+        longitude = request.form['longitude']
+        otherinfo = request.form['other-info']
+        mongo.db.farmers.insert_one({
+            'full-name': fullName,
+            'Age': Age,
+            'email': email,
+            'phone': phone,
+            'district': district,
+            'taluka': taluka,
+            'landsize': landsize,
+            'address': address,
+            'latitude': latitude,
+            'longitude': longitude,
+            'other-info': otherinfo
+        })
+        # Redirect to success page...
+        return redirect(url_for('popup'))
+    else:
+        return 'Error'
 
 @app.route('/map', methods=['GET', 'POST'])
-def mapindex():
-    district = None
-    map_html = None
+def display_map():
 
     if request.method == 'POST':
-        
-        district = request.form['district']
+        district = request.form['district'].strip()
 
-        # Filter data for the district
-        f_data = farmers_data[farmers_data['District'] == district]
+        # Query the MongoDB database for the latitude and longitude of the given district
+        # and store the results in a list of dictionaries
+        locations = list(mongo.db.farmers.find({'district': district}, {'_id': 0, 'latitude': 1, 'longitude': 1}))
+        if not locations:
+            return render_template('mindex.html', district=district, error='No records found for this district.')
+        # Create a Folium map centered on the first location in the list
+        map = folium.Map(location=[locations[0]['latitude'], locations[0]['longitude']], zoom_start=10)
+        # Add markers for all the locations in the list
+        for location in locations:
+            # Query the MongoDB database for the user information
+            row = mongo.db.farmers.find_one({'district': district, 'latitude': location['latitude'], 'longitude': location['longitude']})
+            # Create a string with the user information to be displayed in the pop-up
+            # if user_info is not None:
+            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["full-name"]}</td></tr><tr><th>Phone No:</th><td>{row["phone"]}</td></tr><tr><th>Land size:</th><td>{row["landsize"]} acre</td></tr></table>'
+            folium.Marker(location=[location['latitude'], location['longitude']], popup=popup_html).add_to(map)
 
-        # Drop rows with missing location data
-        f_data = f_data.dropna(subset=['Latitude', 'Longitude'])
+        # Convert the map to HTML and pass it to the template
+        map_html = map._repr_html_()
+        return render_template('mindex.html', district=district, map_html=map_html)
 
-        # Calculate center of the district
-        district_center = [f_data['Latitude'].mean(), f_data['Longitude'].mean()]
-
-        # Create the map object
-        m = folium.Map(location=district_center, zoom_start=10)
-
-        # Add markers for each farmer
-        fg = folium.FeatureGroup(name='Farmers')
-        for _, row in f_data.iterrows():
-            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["Name"]}</td></tr><tr><th>Phone No:</th><td>{row["Phone_no"]}</td></tr><tr><th>Land size:</th><td>{row["Land_size"]} acre</td></tr></table>'
-            fg.add_child(folium.Marker(location=[row["Latitude"], row["Longitude"]], popup=popup_html, icon=folium.Icon(color='darkgreen')))
-        
-        m.add_child(fg)
-
-        # Convert the map object to HTML
-        map_html = m.get_root().render()
-
-    # Render the HTML template with the form and map
-    return render_template('mindex.html', district=district, map_html=map_html)
+    # If the request method is not 'POST', return the default map page
+    return render_template('mindex.html', district='', map_html='', error='')
 
 ########---------Hindi Routes-------########
 
@@ -217,38 +219,30 @@ def hindipopup():
 
 @app.route('/himap', methods=['GET', 'POST'])
 def himapindex():
-    district = None
-    map_html = None
-
     if request.method == 'POST':
-        
-        district = request.form['district']
+        district = request.form['district'].strip()
 
-        # Filter data for the district
-        f_data = farmers_data[farmers_data['District'] == district]
+        # Query the MongoDB database for the latitude and longitude of the given district
+        # and store the results in a list of dictionaries
+        locations = list(mongo.db.farmers.find({'district': district}, {'_id': 0, 'latitude': 1, 'longitude': 1}))
+        if not locations:
+            return render_template('mindex_hi.html', district=district, error='No records found for this district.')
+        # Create a Folium map centered on the first location in the list
+        map = folium.Map(location=[locations[0]['latitude'], locations[0]['longitude']], zoom_start=10)
+        # Add markers for all the locations in the list
+        for location in locations:
+            # Query the MongoDB database for the user information
+            row = mongo.db.farmers.find_one({'district': district, 'latitude': location['latitude'], 'longitude': location['longitude']})
+            # Create a string with the user information to be displayed in the pop-up
+            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["full-name"]}</td></tr><tr><th>Phone No:</th><td>{row["phone"]}</td></tr><tr><th>Land size:</th><td>{row["landsize"]} acre</td></tr></table>'
+            # Add a marker with the pop-up to the map
+            folium.Marker(location=[location['latitude'], location['longitude']], popup=popup_html,icon=folium.Icon(color='darkgreen')).add_to(map)
+        # Convert the map to HTML and pass it to the template
+        map_html = map._repr_html_()
+        return render_template('mindex_hi.html', district=district, map_html=map_html)
 
-        # Drop rows with missing location data
-        f_data = f_data.dropna(subset=['Latitude', 'Longitude'])
-
-        # Calculate center of the district
-        district_center = [f_data['Latitude'].mean(), f_data['Longitude'].mean()]
-
-        # Create the map object
-        m = folium.Map(location=district_center, zoom_start=10)
-
-        # Add markers for each farmer
-        fg = folium.FeatureGroup(name='Farmers')
-        for _, row in f_data.iterrows():
-            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["Name"]}</td></tr><tr><th>Phone No:</th><td>{row["Phone_no"]}</td></tr><tr><th>Land size:</th><td>{row["Land_size"]} acre</td></tr></table>'
-            fg.add_child(folium.Marker(location=[row["Latitude"], row["Longitude"]], popup=popup_html, icon=folium.Icon(color='darkgreen')))
-        
-        m.add_child(fg)
-
-        # Convert the map object to HTML
-        map_html = m.get_root().render()
-
-    # Render the HTML template with the form and map
-    return render_template('mindex_hi.html', district=district, map_html=map_html)
+    # If the request method is not 'POST', return the default map page
+    return render_template('mindex_hi.html', district='', map_html='', error='')
 
 @app.route('/hifarmer')
 def hifarmindex():
@@ -256,39 +250,35 @@ def hifarmindex():
 
 @app.route('/hisubmit', methods=['POST'])
 def hisubmit():
-    name = request.form['name']
-    age = request.form['age']
-    email = request.form['email']
-    district = request.form['district']
-    taluka = request.form['taluka']
-    address = request.form['address']
-    landsize = request.form['landsize']
-    phone_no= request.form['phone_no']
-    other_info = request.form['other_info']
-    # Create a new DataFrame
-    data = {'Name': [name],'Phone_no': [phone_no],'Land_size': [landsize],
-            'Address': [address],'District': [district],'Taluka': [taluka],'Age':[age],'Email':[email],'Other_info':[other_info]}
-   
-    df = pd.DataFrame(data)
-    
-    # Get latitude and longitude from address using Geopy
-    geolocator = Nominatim(user_agent="my_app")
-    location = geolocator.geocode(address)
-    latitude = location.latitude
-    longitude = location.longitude
-    
-    # Add latitude and longitude to DataFrame
-    df['Latitude'] = latitude
-    df['Longitude'] = longitude
-    
-    # Save the DataFrame to F_dataset.csv without appending age and email columns
-    existing_df = pd.read_csv('F_Dataset.csv')
-    # existing_df = existing_df.drop(['Age', 'Email'], axis=1)
-    updated_df = pd.concat([existing_df, df], ignore_index=True)
-    updated_df.to_csv('F_Dataset.csv', index=False)
-    
-    return render_template('popup_hi.html')
-
+    if request.method == 'POST':
+        fullName = request.form['full-name']
+        Age = request.form['Age']
+        email = request.form['email']
+        phone = request.form['phone']
+        district = request.form['district']
+        taluka = request.form['taluka']
+        landsize = request.form['landsize']
+        address = request.form['address']
+        latitude = request.form['latitude']
+        longitude = request.form['longitude']
+        otherinfo = request.form['other-info']
+        mongo.db.farmers.insert_one({
+            'full-name': fullName,
+            'Age': Age,
+            'email': email,
+            'phone': phone,
+            'district': district,
+            'taluka': taluka,
+            'landsize': landsize,
+            'address': address,
+            'latitude': latitude,
+            'longitude': longitude,
+            'other-info': otherinfo
+        })
+        # Redirect to success page...
+        return redirect(url_for('popup'))
+    else:
+        return 'Error'
 @app.route('/hicrop')
 def hicrop():
     return render_template('cindex_hi.html')
@@ -357,9 +347,9 @@ def hichart():
     crops = []
     for crop in selected_crops:
         if lat_df[crop].iloc[0] == 0:
-            crops.append((crop, f'{district} जिला में उगता नहीं है।'))
+            crops.append((crop, f'does not grow in {district}.'))
         else:
-            crops.append((crop, f"{district} जिला में उगता है।"))
+            crops.append((crop, f'grows in {district}.'))
 
     return render_template('cindex_hi.html', crops=crops, max_crop=max_col, top_5=top_5, top_districts=top_districts)
 
@@ -391,38 +381,30 @@ def marathipopup():
 
 @app.route('/mamap', methods=['GET', 'POST'])
 def mamapindex():
-    district = None
-    map_html = None
-
     if request.method == 'POST':
-        
-        district = request.form['district']
+        district = request.form['district'].strip()
 
-        # Filter data for the district
-        f_data = farmers_data[farmers_data['District'] == district]
+        # Query the MongoDB database for the latitude and longitude of the given district
+        # and store the results in a list of dictionaries
+        locations = list(mongo.db.farmers.find({'district': district}, {'_id': 0, 'latitude': 1, 'longitude': 1}))
+        if not locations:
+            return render_template('mindex_ma.html', district=district, error='No records found for this district.')
+        # Create a Folium map centered on the first location in the list
+        map = folium.Map(location=[locations[0]['latitude'], locations[0]['longitude']], zoom_start=10)
+        # Add markers for all the locations in the list
+        for location in locations:
+            # Query the MongoDB database for the user information
+            row = mongo.db.farmers.find_one({'district': district, 'latitude': location['latitude'], 'longitude': location['longitude']})
+            # Create a string with the user information to be displayed in the pop-up
+            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["full-name"]}</td></tr><tr><th>Phone No:</th><td>{row["phone"]}</td></tr><tr><th>Land size:</th><td>{row["landsize"]} acre</td></tr></table>'
+            # Add a marker with the pop-up to the map
+            folium.Marker(location=[location['latitude'], location['longitude']], popup=popup_html).add_to(map)
+        # Convert the map to HTML and pass it to the template
+        map_html = map._repr_html_()
+        return render_template('mindex_ma.html', district=district, map_html=map_html)
 
-        # Drop rows with missing location data
-        f_data = f_data.dropna(subset=['Latitude', 'Longitude'])
-
-        # Calculate center of the district
-        district_center = [f_data['Latitude'].mean(), f_data['Longitude'].mean()]
-
-        # Create the map object
-        m = folium.Map(location=district_center, zoom_start=10)
-
-        # Add markers for each farmer
-        fg = folium.FeatureGroup(name='Farmers')
-        for _, row in f_data.iterrows():
-            popup_html = f'<table style="width: 300px;"><tr><th>Farmer Name:</th><td>{row["Name"]}</td></tr><tr><th>Phone No:</th><td>{row["Phone_no"]}</td></tr><tr><th>Land size:</th><td>{row["Land_size"]} acre</td></tr></table>'
-            fg.add_child(folium.Marker(location=[row["Latitude"], row["Longitude"]], popup=popup_html, icon=folium.Icon(color='darkgreen')))
-        
-        m.add_child(fg)
-
-        # Convert the map object to HTML
-        map_html = m.get_root().render()
-
-    # Render the HTML template with the form and map
-    return render_template('mindex_ma.html', district=district, map_html=map_html)
+    # If the request method is not 'POST', return the default map page
+    return render_template('mindex_ma.html', district='', map_html='', error='')
 
 @app.route('/mafarmer')
 def mafarmindex():
@@ -430,38 +412,35 @@ def mafarmindex():
 
 @app.route('/masubmit', methods=['POST'])
 def masubmit():
-    name = request.form['name']
-    age = request.form['age']
-    email = request.form['email']
-    district = request.form['district']
-    taluka = request.form['taluka']
-    address = request.form['address']
-    landsize = request.form['landsize']
-    phone_no= request.form['phone_no']
-    other_info = request.form['other_info']
-    # Create a new DataFrame
-    data = {'Name': [name],'Phone_no': [phone_no],'Land_size': [landsize],
-            'Address': [address],'District': [district],'Taluka': [taluka],'Age':[age],'Email':[email],'Other_info':[other_info]}
-   
-    df = pd.DataFrame(data)
-    
-    # Get latitude and longitude from address using Geopy
-    geolocator = Nominatim(user_agent="my_app")
-    location = geolocator.geocode(address)
-    latitude = location.latitude
-    longitude = location.longitude
-    
-    # Add latitude and longitude to DataFrame
-    df['Latitude'] = latitude
-    df['Longitude'] = longitude
-    
-    # Save the DataFrame to F_dataset.csv without appending age and email columns
-    existing_df = pd.read_csv('F_Dataset.csv')
-    # existing_df = existing_df.drop(['Age', 'Email'], axis=1)
-    updated_df = pd.concat([existing_df, df], ignore_index=True)
-    updated_df.to_csv('F_Dataset.csv', index=False)
-    
-    return render_template('popup_ma.html')
+    if request.method == 'POST':
+        fullName = request.form['full-name']
+        Age = request.form['Age']
+        email = request.form['email']
+        phone = request.form['phone']
+        district = request.form['district']
+        taluka = request.form['taluka']
+        landsize = request.form['landsize']
+        address = request.form['address']
+        latitude = request.form['latitude']
+        longitude = request.form['longitude']
+        otherinfo = request.form['other-info']
+        mongo.db.farmers.insert_one({
+            'full-name': fullName,
+            'Age': Age,
+            'email': email,
+            'phone': phone,
+            'district': district,
+            'taluka': taluka,
+            'landsize': landsize,
+            'address': address,
+            'latitude': latitude,
+            'longitude': longitude,
+            'other-info': otherinfo
+        })
+        # Redirect to success page...
+        return redirect(url_for('popup'))
+    else:
+        return 'Error'
 
 @app.route('/macrop')
 def macrop():
@@ -531,12 +510,12 @@ def machart():
     crops = []
     for crop in selected_crops:
         if lat_df[crop].iloc[0] == 0:
-            crops.append((crop, f'जमिनी,{district} येथे वाढत नाही.'))
+            crops.append((crop, f'does not grow in {district}.'))
         else:
-            crops.append((crop, f'{district}मध्ये पिकतात.'))
+            crops.append((crop, f'grows in {district}.'))
 
     return render_template('cindex_ma.html', crops=crops, max_crop=max_col, top_5=top_5, top_districts=top_districts)
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(port=5500, debug=True)
