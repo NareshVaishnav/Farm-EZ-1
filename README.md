@@ -132,4 +132,7 @@ All Students of THAKUR COLLEGE OF ENGINNERING, KANDIVALI.
 
 • Networking: We were interested in meeting new people and building connections with like-minded individuals. We believed that the hackathon would provide us with a platform to interact with other tech enthusiasts, share ideas and collaborate on future projects.
 
-• Challenge: We were motivated by the challenge of participating in a hackathon. We were excited to test our skills and knowledge against other talented individuals and push ourselves out of our comfort zones. 
+• Challenge: We were motivated by the challenge of participating in a hackathon. We were excited to test our skills and knowledge against other talented individuals and push ourselves out of our comfort zones.
+
+My Quine widget:
+[![NareshVaishnav's GitHub | Stats](https://stats.quine.sh/NareshVaishnav/github?theme=dark)](https://quine.sh?utm_source=widgets&utm_campaign=NareshVaishnav)
